@@ -1,0 +1,48 @@
+# PATHSNAP - Preprocessing Configuration
+# Distributed Map-Matching & Route Reconstruction
+
+project:
+  name: "PATHSNAP"
+  version: "1.0.0"
+  random_seed: 42
+
+paths:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  features_data_dir: "data/features"
+  reports_dir: "outputs/reports"
+  visualisations_dir: "outputs/visualisations"
+  maps_dir: "outputs/maps"
+  logs_dir: "outputs/logs"
+
+partitions:
+  train:
+    folder_name: "train"
+    expected_trip_count: 80
+  student_test:
+    folder_name: "student_test"
+    expected_trip_count: 10
+  evaluator_test:
+    folder_name: "evaluator_test"
+    expected_trip_count: 10
+    is_available: false
+
+geospatial:
+  default_crs: "EPSG:4326"
+  projection_type: "utm_auto" # auto-detect UTM zone per trip based on centroid
+  buffer_margin_meters: 500.0  # bounding box padding around trajectory for road network indexing
+
+candidate_generation:
+  search_radius_meters: 50.0   # candidate road search radius (meters)
+  alternative_radii: [30.0, 50.0, 75.0]
+  max_candidates_per_point: 50
+  alignment_forward_window: 25 # number of forward route arcs to search when aligning ground truth
+
+gps_cleaning:
+  min_valid_latitude: -90.0
+  max_valid_latitude: 90.0
+  min_valid_longitude: -180.0
+  max_valid_longitude: 180.0
+  max_realistic_speed_kmh: 180.0 # flag observations with speed > 180 km/h (50 m/s)
+  stationary_speed_threshold_ms: 0.5 # m/s threshold below which heading is marked stationary
+  flag_large_dt_threshold_seconds: 5.0

@@ -1,0 +1,9 @@
+file_format,column_index,column_name,data_type,null_count,min_value,max_value,meaning,verified_status
+.track,0,longitude,float64,0,-100.418538,137.237029,"WGS 84 geodetic longitude in decimal degrees [-180, 180]",Fully Compliant
+.track,1,latitude,float64,0,-34.640291,61.69959,"WGS 84 geodetic latitude in decimal degrees [-90, 90]",Fully Compliant
+.track,2,timestamp,float64,0,1.0,154034.0,"Elapsed/epoch time in seconds, nominally sampled at 1 Hz",Fully Compliant
+.nodes,0,longitude,float64,0,-100.428454,137.247005,WGS 84 geodetic longitude of road network node; 0-based row index defines node_id,Fully Compliant
+.nodes,1,latitude,float64,0,-34.650477,61.709158,WGS 84 geodetic latitude of road network node; 0-based row index defines node_id,Fully Compliant
+.arcs,0,from_node_id,int64,0,0.0,155002.0,Source node ID (0-based integer index referencing .nodes row); 0-based row index defines arc_id,Fully Compliant
+.arcs,1,to_node_id,int64,0,0.0,155002.0,Target node ID (0-based integer index referencing .nodes row); 0-based row index defines arc_id,Fully Compliant
+.route,0,arc_id,int64,0,0.0,306561.0,Traversed road segment arc ID (0-based integer referencing .arcs row in chronological sequence),Fully Compliant

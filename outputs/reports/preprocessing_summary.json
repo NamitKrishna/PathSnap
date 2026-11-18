@@ -1,0 +1,14 @@
+{
+  "execution_timestamp": "2026-11-18T11:33:58.116037",
+  "train_trips_count": 80,
+  "student_test_trips_count": 10,
+  "evaluator_test_trips_count": 0,
+  "evaluator_test_status": "Unavailable in workspace - evaluated independently",
+  "successful_trips_processed": 90,
+  "failed_trips_count": 0,
+  "failed_trips": [],
+  "mean_candidate_hit_rate": 0.95983964566534,
+  "mean_candidate_miss_rate": 0.04016035433466,
+  "mean_candidates_per_point": 11.654943504197677,
+  "zero_candidate_points_total": 18230
+}

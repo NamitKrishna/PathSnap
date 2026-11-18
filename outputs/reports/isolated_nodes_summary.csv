@@ -1,0 +1,4 @@
+partition,total_trips,strictly_isolated_nodes_count,trips_with_strictly_isolated_nodes,strictly_isolated_percentage_of_nodes,dead_end_nodes_count,dead_end_nodes_pct,source_only_nodes_count,source_only_nodes_pct,total_nodes_in_partition
+train,80,0,0,0.0,900,0.0465,903,0.0467,1933485
+student_test,10,0,0,0.0,55,0.0606,49,0.054,90689
+overall,90,0,0,0.0,955,0.0472,952,0.047,2024174
