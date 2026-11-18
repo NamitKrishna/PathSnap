@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { Input, Textarea } from '../components/ui/Input';
+import { Card } from '../components/ui/Card';
+import { Textarea } from '../components/ui/Input';
+import { Badge } from '../components/ui/Badge';
 import { cn } from '../lib/utils';
 import { api, type GPSPoint, type ReconstructionRequest, type ReconstructedRoute } from '../lib/api';
 import {
-  MapPin,
   Upload,
   Download,
   Trash2,
@@ -15,12 +16,10 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle,
-  Settings,
-  Eye,
-  Layers,
+  Sparkles,
 } from 'lucide-react';
 
-// Fix Leaflet marker icon issue
+// Fix Leaflet marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -28,66 +27,108 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-interface ReconstructPageState {
-  // Input
-  inputMethod: 'manual' | 'file' | 'json';
+const sampleTrips: { name: string; desc: string; points: GPSPoint[] }[] = [
+  {
+    name: 'SF Downtown Loop',
+    desc: '15 GPS observations in SF Financial District',
+    points: Array.from({ length: 15 }, (_, i) => ({
+      latitude: 37.7946,
+      longitude: -122.3999 + i * 0.001,
+      timestamp: new Date(Date.now() + i * 10000).toISOString(),
+      speed: 8.5,
+      heading: 90.0,
+      accuracy: 5.0,
+    })),
+  },
+  {
+    name: 'Golden Gate Park Crossing',
+    desc: '20 GPS observations along park corridor',
+    points: Array.from({ length: 20 }, (_, i) => ({
+      latitude: 37.7694,
+      longitude: -122.4862 + i * 0.001,
+      timestamp: new Date(Date.now() + i * 12000).toISOString(),
+      speed: 11.2,
+      heading: 90.0,
+      accuracy: 4.0,
+    })),
+  },
+  {
+    name: 'Mission District Transit',
+    desc: '18 GPS points along urban avenues',
+    points: Array.from({ length: 18 }, (_, i) => ({
+      latitude: 37.7599 + i * 0.0005,
+      longitude: -122.4148 + i * 0.0008,
+      timestamp: new Date(Date.now() + i * 8000).toISOString(),
+      speed: 6.8,
+      heading: 35.0,
+      accuracy: 6.0,
+    })),
+  },
+];
+
+interface ReconstructState {
+  inputMethod: 'sample' | 'manual' | 'file' | 'json';
   gpsPoints: GPSPoint[];
   jsonInput: string;
   fileError: string | null;
 
-  // Options
   candidateRadius: number;
   maxCandidates: number;
   transitionPenalty: number;
   includeDiagnostics: boolean;
-  includeGeometry: boolean;
 
-  // Output
   isLoading: boolean;
   error: string | null;
   route: ReconstructedRoute | null;
   diagnostics: any | null;
   requestId: string | null;
 
-  // Map
-  map: L.Map | null;
-  gpsMarkers: L.CircleMarker[];
-  routeLayer: L.Polyline | null;
-  candidateLayers: L.LayerGroup | null;
   showGPSPoints: boolean;
   showCandidates: boolean;
 }
 
-const initialState: ReconstructPageState = {
-  inputMethod: 'manual',
-  gpsPoints: [],
-  jsonInput: '',
-  fileError: null,
-  candidateRadius: 50,
-  maxCandidates: 10,
-  transitionPenalty: 1.0,
-  includeDiagnostics: true,
-  includeGeometry: true,
-  isLoading: false,
-  error: null,
-  route: null,
-  diagnostics: null,
-  requestId: null,
-  map: null,
-  gpsMarkers: [],
-  routeLayer: null,
-  candidateLayers: null,
-  showGPSPoints: true,
-  showCandidates: false,
-};
-
 export function Reconstruct() {
+  const location = useLocation();
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [state, setState] = useState<ReconstructPageState>(initialState);
+  const mapRef = useRef<L.Map | null>(null);
+  const markersRef = useRef<L.CircleMarker[]>([]);
+  const polylineRef = useRef<L.Polyline | null>(null);
 
-  // Initialize map
+  const [state, setState] = useState<ReconstructState>({
+    inputMethod: 'sample',
+    gpsPoints: sampleTrips[0].points,
+    jsonInput: '',
+    fileError: null,
+    candidateRadius: 100,
+    maxCandidates: 10,
+    transitionPenalty: 1.0,
+    includeDiagnostics: true,
+    isLoading: false,
+    error: null,
+    route: null,
+    diagnostics: null,
+    requestId: null,
+    showGPSPoints: true,
+    showCandidates: false,
+  });
+
+  // Check if points passed from navigation (e.g. Upload page)
   useEffect(() => {
-    if (!mapContainerRef.current || state.map) return;
+    const passedPoints = (location.state as any)?.gpsPoints;
+    if (passedPoints && Array.isArray(passedPoints) && passedPoints.length >= 2) {
+      setState(prev => ({
+        ...prev,
+        gpsPoints: passedPoints,
+        inputMethod: 'file',
+        route: null,
+        error: null,
+      }));
+    }
+  }, [location.state]);
+
+  // Initialize Map
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
 
     const map = L.map(mapContainerRef.current, {
       center: [37.7749, -122.4194],
@@ -96,133 +137,155 @@ export function Reconstruct() {
       attributionControl: false,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
+    const streets = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri &mdash; Street Map',
+        maxZoom: 19,
+      }
+    );
+
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
-    }).addTo(map);
+    });
 
-    // Add zoom control to top-right
+    const dark = L.tileLayer(
+      'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri &mdash; Dark Canvas',
+        maxZoom: 16,
+      }
+    );
+
+    const satellite = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri &mdash; Satellite',
+        maxZoom: 19,
+      }
+    );
+
+    // Add Street Map by default so roads, labels and buildings are completely visible
+    streets.addTo(map);
+
+    L.control.layers(
+      {
+        'Street Map': streets,
+        'OpenStreetMap': osm,
+        'Dark Canvas': dark,
+        'Satellite Imagery': satellite,
+      },
+      undefined,
+      { position: 'topright' }
+    ).addTo(map);
+
     L.control.zoom({ position: 'topright' }).addTo(map);
-
-    setState(prev => ({ ...prev, map, candidateLayers: L.layerGroup().addTo(map) }));
+    mapRef.current = map;
 
     return () => {
       map.remove();
-      setState(prev => ({ ...prev, map: null }));
+      mapRef.current = null;
     };
   }, []);
 
-  // Update map when route changes
+  // Update map markers when points change or route is reconstructed
   useEffect(() => {
-    if (!state.map || !state.route) return;
+    const map = mapRef.current;
+    if (!map) return;
 
-    const { route, map, gpsMarkers, routeLayer, candidateLayers } = state;
+    // Clear previous markers
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
 
-    // Clear existing layers
-    gpsMarkers.forEach(m => map.removeLayer(m));
-    if (routeLayer) map.removeLayer(routeLayer);
-    candidateLayers?.clearLayers();
-
-    const newMarkers: L.CircleMarker[] = [];
-    const coords = route.coordinates;
-
-    if (state.showGPSPoints && state.gpsPoints.length > 0) {
-      // Add GPS point markers
-      state.gpsPoints.forEach((point, index) => {
-        const marker = L.circleMarker([point.latitude, point.longitude], {
-          radius: 6,
-          fillColor: '#00d4aa',
-          color: '#0a0a0f',
-          weight: 2,
-          fillOpacity: 0.9,
-        }).bindPopup(`
-          <strong>GPS Point ${index + 1}</strong><br/>
-          Lat: ${point.latitude.toFixed(6)}<br/>
-          Lon: ${point.longitude.toFixed(6)}<br/>
-          Time: ${new Date(point.timestamp).toLocaleTimeString()}<br/>
-          ${point.speed ? `Speed: ${point.speed.toFixed(1)} m/s` : ''}
-        `);
-        newMarkers.push(marker);
-        marker.addTo(map);
-      });
+    // Clear polyline if no route
+    if (!state.route && polylineRef.current) {
+      polylineRef.current.remove();
+      polylineRef.current = null;
     }
 
-    // Add route polyline
-    if (coords.length >= 2) {
-      const latLngs = coords.map(([lon, lat]) => [lat, lon] as L.LatLngExpression);
-      const newRouteLayer = L.polyline(latLngs, {
-        color: '#00d4aa',
-        weight: 4,
-        opacity: 0.9,
+    if (state.gpsPoints.length > 0 && state.showGPSPoints) {
+      const latLngs: L.LatLngExpression[] = [];
+
+      state.gpsPoints.forEach((p, idx) => {
+        const marker = L.circleMarker([p.latitude, p.longitude], {
+          radius: 6,
+          fillColor: '#00d4aa',
+          color: '#090a10',
+          weight: 2,
+          fillOpacity: 0.95,
+        }).bindPopup(`
+          <div style="font-family: inherit;">
+            <strong style="color: #00d4aa;">Observation #${idx + 1}</strong><br/>
+            Lat: ${p.latitude.toFixed(6)}<br/>
+            Lon: ${p.longitude.toFixed(6)}<br/>
+            Time: ${new Date(p.timestamp).toLocaleTimeString()}
+            ${p.speed ? `<br/>Speed: ${p.speed.toFixed(1)} m/s` : ''}
+          </div>
+        `);
+        marker.addTo(map);
+        markersRef.current.push(marker);
+        latLngs.push([p.latitude, p.longitude]);
+      });
+
+      // Fit map bounds if no route drawn yet
+      if (!state.route && latLngs.length > 0) {
+        map.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50], maxZoom: 16 });
+      }
+    }
+  }, [state.gpsPoints, state.showGPSPoints, state.route]);
+
+  // Update route polyline when route reconstruction succeeds
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !state.route) return;
+
+    if (polylineRef.current) {
+      polylineRef.current.remove();
+    }
+
+    const coords = state.route.coordinates;
+    if (coords && coords.length >= 2) {
+      const latLngs = coords.map(([lon, lat]: [number, number]) => [lat, lon] as L.LatLngExpression);
+
+      const polyline = L.polyline(latLngs, {
+        color: '#8b5cf6',
+        weight: 5,
+        opacity: 0.95,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(map);
 
-      // Fit bounds to route
-      const bounds = L.latLngBounds(latLngs);
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      polyline.bindPopup(`
+        <div style="font-family: inherit;">
+          <strong style="color: #8b5cf6;">Reconstructed Route</strong><br/>
+          Arcs: ${state.route.arc_ids.length}<br/>
+          Distance: ${(state.route.total_distance_m / 1000).toFixed(2)} km<br/>
+          Matched Points: ${state.route.point_count}
+        </div>
+      `);
 
-      setState(prev => ({
-        ...prev,
-        gpsMarkers: newMarkers,
-        routeLayer: newRouteLayer,
-      }));
+      polylineRef.current = polyline;
+      map.fitBounds(L.latLngBounds(latLngs), { padding: [60, 60], maxZoom: 16 });
     }
-  }, [state.route, state.showGPSPoints, state.gpsPoints]);
+  }, [state.route]);
 
-  const handleFileUpload = async (file: File) => {
-    setState(prev => ({ ...prev, fileError: null }));
-    try {
-      const points = await api.parseGPSFile(file);
-      setState(prev => ({ ...prev, gpsPoints: points, inputMethod: 'file' }));
-    } catch (err) {
-      setState(prev => ({ ...prev, fileError: err instanceof Error ? err.message : 'Failed to parse file' }));
-    }
-  };
-
-  const handleJSONInput = () => {
-    try {
-      const points = api.parseJSON(state.jsonInput);
-      setState(prev => ({ ...prev, gpsPoints: points, fileError: null }));
-    } catch (err) {
-      setState(prev => ({ ...prev, fileError: err instanceof Error ? err.message : 'Invalid JSON' }));
-    }
-  };
-
-  const addManualPoint = () => {
+  // Load a sample preset
+  const handleSelectSample = (trip: typeof sampleTrips[0]) => {
     setState(prev => ({
       ...prev,
-      gpsPoints: [
-        ...prev.gpsPoints,
-        {
-          latitude: 37.7749 + Math.random() * 0.01,
-          longitude: -122.4194 + Math.random() * 0.01,
-          timestamp: new Date(Date.now() + prev.gpsPoints.length * 10000).toISOString(),
-        }
-      ]
+      inputMethod: 'sample',
+      gpsPoints: trip.points,
+      route: null,
+      diagnostics: null,
+      error: null,
     }));
   };
 
-  const removePoint = (index: number) => {
-    setState(prev => ({
-      ...prev,
-      gpsPoints: prev.gpsPoints.filter((_, i) => i !== index)
-    }));
-  };
-
-  const updatePoint = (index: number, field: keyof GPSPoint, value: string | number) => {
-    setState(prev => ({
-      ...prev,
-      gpsPoints: prev.gpsPoints.map((p, i) =>
-        i === index ? { ...p, [field]: typeof value === 'string' && field !== 'timestamp' ? parseFloat(value) : value } : p
-      )
-    }));
-  };
-
+  // Run Route Reconstruction
   const handleReconstruct = async () => {
     if (state.gpsPoints.length < 2) {
-      setState(prev => ({ ...prev, error: 'At least 2 GPS points required' }));
+      setState(prev => ({ ...prev, error: 'At least 2 GPS observations are required for map matching' }));
       return;
     }
 
@@ -236,7 +299,7 @@ export function Reconstruct() {
           max_candidates_per_point: state.maxCandidates,
           transition_penalty: state.transitionPenalty,
           include_diagnostics: state.includeDiagnostics,
-          include_geometry: state.includeGeometry,
+          include_geometry: true,
         },
       };
 
@@ -248,7 +311,7 @@ export function Reconstruct() {
         route: response.route || null,
         diagnostics: response.diagnostics || null,
         requestId: response.request_id,
-        error: response.success ? null : response.error || 'Reconstruction failed',
+        error: response.success ? null : (response.error || 'Reconstruction failed'),
       }));
     } catch (err) {
       setState(prev => ({
@@ -259,438 +322,411 @@ export function Reconstruct() {
     }
   };
 
+  // Export GeoJSON
+  const handleExportGeoJSON = () => {
+    if (!state.route) return;
+    const geojson = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {
+            arc_ids: state.route.arc_ids,
+            total_distance_m: state.route.total_distance_m,
+            point_count: state.route.point_count,
+            request_id: state.requestId,
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: state.route.coordinates,
+          },
+        },
+      ],
+    };
+
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pathsnap_route_${state.requestId || 'export'}.geojson`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleClear = () => {
     setState(prev => ({
       ...prev,
       gpsPoints: [],
       route: null,
       diagnostics: null,
-      requestId: null,
       error: null,
+      requestId: null,
       jsonInput: '',
-      fileError: null,
     }));
-    if (state.routeLayer) {
-      state.map?.removeLayer(state.routeLayer);
+    if (polylineRef.current) {
+      polylineRef.current.remove();
+      polylineRef.current = null;
     }
-    state.gpsMarkers.forEach(m => state.map?.removeLayer(m));
-    setState(prev => ({ ...prev, gpsMarkers: [], routeLayer: null }));
-    state.candidateLayers?.clearLayers();
-  };
-
-  const formatDuration = (ms: number) => {
-    if (ms < 1000) return `${ms.toFixed(1)}ms`;
-    return `${(ms / 1000).toFixed(2)}s`;
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex">
-      {/* Sidebar */}
-      <aside className="w-full lg:w-96 flex-shrink-0 border-r border-border-primary bg-bg-secondary/50 p-4 lg:p-6 overflow-y-auto">
+    <div className="w-full flex-1 flex flex-col lg:flex-row min-h-[calc(100vh-4rem)]">
+      {/* Sidebar Controls */}
+      <aside className="w-full lg:w-[420px] flex-shrink-0 bg-bg-secondary/70 border-r border-border-primary/80 p-5 lg:p-6 overflow-y-auto max-h-none lg:max-h-[calc(100vh-4rem)]">
         <div className="space-y-6">
-          {/* Input Method Tabs */}
-          <div className="flex gap-1 bg-bg-tertiary rounded-lg p-1" role="tablist">
-            {[
-              { id: 'manual', label: 'Manual', icon: MapPin },
-              { id: 'file', label: 'File Upload', icon: Upload },
-              { id: 'json', label: 'JSON Input', icon: Settings },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isActive = state.inputMethod === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => setState(prev => ({ ...prev, inputMethod: tab.id as any, fileError: null }))}
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all',
-                    isActive
-                      ? 'bg-bg-card text-text-primary shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary'
-                  )}
-                >
-                  <Icon className="w-4 h-4" aria-hidden="true" />
-                  {tab.label}
-                </button>
-              );
-            })}
+          <div>
+            <h1 className="text-2xl font-bold text-text-primary tracking-tight">Route Reconstruction</h1>
+            <p className="text-xs text-text-secondary mt-1">
+              Test candidate generation, Random Forest scoring, and HMM Viterbi decoding.
+            </p>
           </div>
 
-          {/* Input Forms */}
-          <Card variant="glass">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-accent-primary" />
-                GPS Points ({state.gpsPoints.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {state.inputMethod === 'manual' && (
-                <div className="space-y-3">
-                  {state.gpsPoints.map((point, index) => (
-                    <div key={index} className="flex items-center gap-2 p-3 bg-bg-tertiary rounded-lg">
-                      <span className="text-xs text-text-muted w-6 text-center">{index + 1}</span>
-                      <Input
-                        type="number"
-                        step="0.000001"
-                        placeholder="Latitude"
-                        value={point.latitude}
-                        onChange={(e) => updatePoint(index, 'latitude', e.target.value)}
-                        className="w-24"
-                        aria-label={`Point ${index + 1} latitude`}
-                      />
-                      <Input
-                        type="number"
-                        step="0.000001"
-                        placeholder="Longitude"
-                        value={point.longitude}
-                        onChange={(e) => updatePoint(index, 'longitude', e.target.value)}
-                        className="w-24"
-                        aria-label={`Point ${index + 1} longitude`}
-                      />
-                      <Input
-                        type="datetime-local"
-                        value={point.timestamp.replace('Z', '').replace('T', 'T').slice(0, 16)}
-                        onChange={(e) => updatePoint(index, 'timestamp', new Date(e.target.value).toISOString())}
-                        className="flex-1"
-                        aria-label={`Point ${index + 1} timestamp`}
-                      />
-                      <button
-                        onClick={() => removePoint(index)}
-                        className="p-1.5 text-text-muted hover:text-error hover:bg-error/10 rounded transition-colors"
-                        aria-label={`Remove point ${index + 1}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                  {state.gpsPoints.length < 10 && (
-                    <Button variant="secondary" size="sm" onClick={addManualPoint} className="w-full">
-                      <MapPin className="w-4 h-4" />
-                      Add Point
-                    </Button>
-                  )}
-                </div>
-              )}
-
-              {state.inputMethod === 'file' && (
-                <div className="space-y-3">
-                  <div
-                    className="border-2 border-dashed border-border-primary rounded-lg p-8 text-center hover:border-accent-primary/50 transition-colors"
-                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-accent-primary'); }}
-                    onDragLeave={(e) => { e.currentTarget.classList.remove('border-accent-primary'); }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.currentTarget.classList.remove('border-accent-primary');
-                      const file = e.dataTransfer.files[0];
-                      if (file) handleFileUpload(file);
-                    }}
+          {/* Preset Sample Trips Selector */}
+          <div className="space-y-2">
+            <span className="text-xs font-semibold text-text-muted uppercase tracking-wider block">
+              Quick Test Presets
+            </span>
+            <div className="grid grid-cols-1 gap-2">
+              {sampleTrips.map((trip) => {
+                const isSelected =
+                  state.inputMethod === 'sample' && state.gpsPoints.length === trip.points.length;
+                return (
+                  <button
+                    key={trip.name}
+                    onClick={() => handleSelectSample(trip)}
+                    className={cn(
+                      'text-left p-3 rounded-lg border transition-all flex items-center justify-between',
+                      isSelected
+                        ? 'bg-accent-primary/10 border-accent-primary text-text-primary'
+                        : 'bg-bg-tertiary/60 border-border-primary/70 text-text-secondary hover:text-text-primary hover:border-border-secondary'
+                    )}
                   >
-                    <Upload className="w-10 h-10 mx-auto text-text-muted mb-3" />
-                    <p className="text-text-secondary mb-1">Drag & drop GPS file here</p>
-                    <p className="text-xs text-text-muted">CSV, GPX, or JSON</p>
-                    <input
-                      type="file"
-                      accept=".csv,.gpx,.json"
-                      className="hidden"
-                      id="file-upload"
-                      onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); }}
-                    />
-                    <label htmlFor="file-upload" className="mt-3 inline-flex items-center gap-2 text-sm text-accent-primary hover:underline cursor-pointer">
-                      <Upload className="w-4 h-4" />
-                      Browse files
-                    </label>
-                  </div>
-
-                  {state.fileError && (
-                    <div className="p-3 bg-error/10 border border-error/30 rounded-lg text-error text-sm flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      {state.fileError}
+                    <div>
+                      <div className="font-semibold text-sm">{trip.name}</div>
+                      <div className="text-xs text-text-muted">{trip.desc}</div>
                     </div>
-                  )}
+                    <Badge variant={isSelected ? 'success' : 'default'} className="text-xs">
+                      {trip.points.length} pts
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-                  {state.gpsPoints.length > 0 && (
-                    <div className="text-sm text-text-secondary">
-                      Parsed {state.gpsPoints.length} points from file
-                    </div>
-                  )}
+          {/* Input Method Selector Tabs */}
+          <div className="flex bg-bg-tertiary/80 rounded-lg p-1 border border-border-primary/50 text-xs font-medium">
+            <button
+              onClick={() => setState(prev => ({ ...prev, inputMethod: 'sample' }))}
+              className={cn(
+                'flex-1 py-1.5 rounded-md transition-all text-center',
+                state.inputMethod === 'sample' ? 'bg-bg-card text-accent-primary font-bold shadow-sm' : 'text-text-secondary'
+              )}
+            >
+              Presets
+            </button>
+            <button
+              onClick={() => setState(prev => ({ ...prev, inputMethod: 'manual' }))}
+              className={cn(
+                'flex-1 py-1.5 rounded-md transition-all text-center',
+                state.inputMethod === 'manual' ? 'bg-bg-card text-accent-primary font-bold shadow-sm' : 'text-text-secondary'
+              )}
+            >
+              Manual ({state.gpsPoints.length})
+            </button>
+            <button
+              onClick={() => setState(prev => ({ ...prev, inputMethod: 'file' }))}
+              className={cn(
+                'flex-1 py-1.5 rounded-md transition-all text-center',
+                state.inputMethod === 'file' ? 'bg-bg-card text-accent-primary font-bold shadow-sm' : 'text-text-secondary'
+              )}
+            >
+              File
+            </button>
+            <button
+              onClick={() => setState(prev => ({ ...prev, inputMethod: 'json' }))}
+              className={cn(
+                'flex-1 py-1.5 rounded-md transition-all text-center',
+                state.inputMethod === 'json' ? 'bg-bg-card text-accent-primary font-bold shadow-sm' : 'text-text-secondary'
+              )}
+            >
+              JSON
+            </button>
+          </div>
+
+          {/* File Upload Tab */}
+          {state.inputMethod === 'file' && (
+            <div className="p-4 bg-bg-tertiary/50 border border-dashed border-border-primary rounded-xl text-center">
+              <Upload className="w-8 h-8 text-accent-primary mx-auto mb-2 opacity-80" />
+              <p className="text-xs text-text-primary font-medium">Upload GPS File</p>
+              <p className="text-xs text-text-muted mb-3">Supports CSV, GPX, or JSON track files</p>
+              <label className="btn btn-secondary text-xs cursor-pointer py-1.5 px-3">
+                Select File
+                <input
+                  type="file"
+                  accept=".csv,.gpx,.json"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      try {
+                        const pts = await api.parseGPSFile(file);
+                        setState(prev => ({ ...prev, gpsPoints: pts, error: null, route: null }));
+                      } catch (err: any) {
+                        setState(prev => ({ ...prev, error: err.message }));
+                      }
+                    }
+                  }}
+                />
+              </label>
+              {state.gpsPoints.length > 0 && (
+                <div className="mt-3 text-xs text-accent-primary font-mono">
+                  {state.gpsPoints.length} points loaded from file
                 </div>
               )}
+            </div>
+          )}
 
-              {state.inputMethod === 'json' && (
-                <div className="space-y-3">
-                  <Textarea
-                    value={state.jsonInput}
-                    onChange={(e) => setState(prev => ({ ...prev, jsonInput: e.target.value }))}
-                    placeholder='{"points": [{"latitude": 37.7749, "longitude": -122.4194, "timestamp": "2024-01-15T10:00:00"}, ...]}'
-                    rows={8}
-                    className="font-mono text-xs"
-                    aria-label="JSON input"
-                  />
-                  <div className="flex gap-2">
-                    <Button variant="secondary" size="sm" onClick={handleJSONInput}>
-                      Parse JSON
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setState(prev => ({ ...prev, jsonInput: JSON.stringify({ points: state.gpsPoints }, null, 2) }))}>
-                      Use Current Points
-                    </Button>
-                  </div>
-                  {state.fileError && (
-                    <p className="text-error text-sm">{state.fileError}</p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* JSON Tab */}
+          {state.inputMethod === 'json' && (
+            <div className="space-y-2">
+              <Textarea
+                rows={6}
+                value={state.jsonInput}
+                onChange={(e) => setState(prev => ({ ...prev, jsonInput: e.target.value }))}
+                placeholder='[{"latitude": 37.7946, "longitude": -122.3999, "timestamp": "2024-01-15T10:00:00Z"}, ...]'
+                className="font-mono text-xs"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full text-xs"
+                onClick={() => {
+                  try {
+                    const pts = api.parseJSON(state.jsonInput);
+                    setState(prev => ({ ...prev, gpsPoints: pts, error: null, route: null }));
+                  } catch (err: any) {
+                    setState(prev => ({ ...prev, error: err.message }));
+                  }
+                }}
+              >
+                Apply JSON Points
+              </Button>
+            </div>
+          )}
 
-          {/* Options */}
-          <Card variant="glass">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Settings className="w-5 h-5 text-accent-primary" />
-                Reconstruction Options
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          {/* Parameters Accordion / Sliders */}
+          <Card variant="glass" className="p-4 border-border-primary/80">
+            <span className="text-xs font-semibold text-text-muted uppercase tracking-wider block mb-3">
+              Decoding Parameters
+            </span>
+            <div className="space-y-4 text-xs">
               <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">
-                  Candidate Radius: {state.candidateRadius}m
-                </label>
+                <div className="flex justify-between mb-1">
+                  <span className="text-text-secondary">Search Radius</span>
+                  <span className="font-mono font-bold text-accent-primary">{state.candidateRadius} m</span>
+                </div>
                 <input
                   type="range"
-                  min="10"
+                  min="20"
                   max="500"
                   step="10"
                   value={state.candidateRadius}
                   onChange={(e) => setState(prev => ({ ...prev, candidateRadius: parseInt(e.target.value) }))}
-                  className="w-full h-2 bg-bg-tertiary rounded-lg appearance-none accent-accent-primary"
+                  className="w-full h-1.5 bg-bg-tertiary rounded-lg appearance-none accent-accent-primary cursor-pointer"
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">
-                  Max Candidates: {state.maxCandidates}
-                </label>
+                <div className="flex justify-between mb-1">
+                  <span className="text-text-secondary">Max Candidates / Obs</span>
+                  <span className="font-mono font-bold text-accent-primary">{state.maxCandidates}</span>
+                </div>
                 <input
                   type="range"
-                  min="1"
-                  max="50"
+                  min="2"
+                  max="30"
                   step="1"
                   value={state.maxCandidates}
                   onChange={(e) => setState(prev => ({ ...prev, maxCandidates: parseInt(e.target.value) }))}
-                  className="w-full h-2 bg-bg-tertiary rounded-lg appearance-none accent-accent-primary"
+                  className="w-full h-1.5 bg-bg-tertiary rounded-lg appearance-none accent-accent-primary cursor-pointer"
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">
-                  Transition Penalty: {state.transitionPenalty.toFixed(1)}
-                </label>
+                <div className="flex justify-between mb-1">
+                  <span className="text-text-secondary">Transition Penalty</span>
+                  <span className="font-mono font-bold text-accent-primary">{state.transitionPenalty.toFixed(1)}</span>
+                </div>
                 <input
                   type="range"
                   min="0"
-                  max="10"
+                  max="5"
                   step="0.1"
                   value={state.transitionPenalty}
                   onChange={(e) => setState(prev => ({ ...prev, transitionPenalty: parseFloat(e.target.value) }))}
-                  className="w-full h-2 bg-bg-tertiary rounded-lg appearance-none accent-accent-primary"
+                  className="w-full h-1.5 bg-bg-tertiary rounded-lg appearance-none accent-accent-primary cursor-pointer"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="include-diagnostics"
-                  checked={state.includeDiagnostics}
-                  onChange={(e) => setState(prev => ({ ...prev, includeDiagnostics: e.target.checked }))}
-                  className="w-4 h-4 rounded border-border-primary bg-bg-tertiary text-accent-primary focus:ring-accent-primary"
-                />
-                <label htmlFor="include-diagnostics" className="text-sm text-text-secondary">
-                  Include Diagnostics
-                </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="include-geometry"
-                  checked={state.includeGeometry}
-                  onChange={(e) => setState(prev => ({ ...prev, includeGeometry: e.target.checked }))}
-                  className="w-4 h-4 rounded border-border-primary bg-bg-tertiary text-accent-primary focus:ring-accent-primary"
-                />
-                <label htmlFor="include-geometry" className="text-sm text-text-secondary">
-                  Include Geometry
-                </label>
-              </div>
-            </CardContent>
+            </div>
           </Card>
 
-          {/* Actions */}
-          <div className="flex gap-3">
+          {/* Action Buttons */}
+          <div className="flex gap-2">
             <Button
               size="lg"
               onClick={handleReconstruct}
               disabled={state.isLoading || state.gpsPoints.length < 2}
-              className="flex-1"
+              className="flex-1 shadow-md shadow-accent-primary/20 text-sm font-bold"
             >
               {state.isLoading ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Processing...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Running Pipeline...
                 </>
               ) : (
                 <>
-                  <Play className="w-4 h-4" />
-                  Reconstruct Route
+                  <Play className="w-4 h-4 mr-2" />
+                  Run Reconstruction
                 </>
               )}
             </Button>
+
             <Button
               size="lg"
               variant="ghost"
               onClick={handleClear}
               disabled={state.gpsPoints.length === 0 && !state.route}
+              className="text-text-muted hover:text-error"
             >
               <Trash2 className="w-4 h-4" />
-              Clear
             </Button>
           </div>
 
-          {/* Results Summary */}
-          {state.route && (
-            <Card variant="glass">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-success" />
-                  Reconstruction Complete
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="p-3 bg-bg-tertiary rounded-lg">
-                    <div className="text-text-muted">Segments</div>
-                    <div className="font-mono font-semibold text-text-primary">{state.route.segment_count}</div>
-                  </div>
-                  <div className="p-3 bg-bg-tertiary rounded-lg">
-                    <div className="text-text-muted">Distance</div>
-                    <div className="font-mono font-semibold text-text-primary">
-                      {(state.route.total_distance_m / 1000).toFixed(2)} km
-                    </div>
-                  </div>
-                  <div className="p-3 bg-bg-tertiary rounded-lg">
-                    <div className="text-text-muted">Points</div>
-                    <div className="font-mono font-semibold text-text-primary">{state.route.point_count}</div>
-                  </div>
-                  <div className="p-3 bg-bg-tertiary rounded-lg">
-                    <div className="text-text-muted">Request ID</div>
-                    <div className="font-mono text-xs text-text-secondary truncate">{state.requestId}</div>
-                  </div>
-                </div>
-
-                {state.diagnostics && (
-                  <div className="pt-3 border-t border-border-primary space-y-2">
-                    <div className="text-xs font-medium text-text-muted uppercase tracking-wider">Timing</div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-text-secondary">Preprocessing</span>
-                        <span className="font-mono text-text-primary">{formatDuration(state.diagnostics.preprocessing_time_ms)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-text-secondary">Candidates</span>
-                        <span className="font-mono text-text-primary">{formatDuration(state.diagnostics.candidate_generation_time_ms)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-text-secondary">ML Model</span>
-                        <span className="font-mono text-text-primary">{formatDuration(state.diagnostics.model_prediction_time_ms)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-text-secondary">Viterbi</span>
-                        <span className="font-mono text-text-primary">{formatDuration(state.diagnostics.decoding_time_ms)}</span>
-                      </div>
-                      <div className="flex justify-between font-medium col-span-2">
-                        <span className="text-text-primary">Total</span>
-                        <span className="font-mono text-accent-primary">{formatDuration(state.diagnostics.total_time_ms)}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-2 pt-2">
-                  <Button variant="secondary" size="sm" className="flex-1">
-                    <Download className="w-4 h-4" />
-                    Export GeoJSON
-                  </Button>
-                  <Button variant="ghost" size="sm">
-                    <Eye className="w-4 h-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          {/* Error Notice */}
+          {state.error && (
+            <div className="p-3 bg-error/15 border border-error/30 rounded-xl text-error text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{state.error}</span>
+            </div>
           )}
 
-          {state.error && (
-            <div className="p-4 bg-error/10 border border-error/30 rounded-lg flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
-              <div className="text-error text-sm">
-                <p className="font-medium">Error</p>
-                <p>{state.error}</p>
+          {/* Telemetry & Results Card */}
+          {state.route && (
+            <Card variant="glass" className="p-4 border-accent-primary/40 bg-accent-primary/5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 text-success font-semibold text-sm">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Matched Successfully</span>
+                </div>
+                <Badge variant="success" className="text-xs font-mono">
+                  {state.requestId}
+                </Badge>
               </div>
-            </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                <div className="p-2.5 bg-bg-tertiary/80 rounded-lg">
+                  <span className="text-text-muted block text-[10px] uppercase">Total Distance</span>
+                  <span className="font-mono text-base font-bold text-text-primary">
+                    {(state.route.total_distance_m / 1000).toFixed(2)} km
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-bg-tertiary/80 rounded-lg">
+                  <span className="text-text-muted block text-[10px] uppercase">Matched Arcs</span>
+                  <span className="font-mono text-base font-bold text-text-primary">
+                    {state.route.arc_ids.length}
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-bg-tertiary/80 rounded-lg">
+                  <span className="text-text-muted block text-[10px] uppercase">Obs Points</span>
+                  <span className="font-mono text-base font-bold text-text-primary">
+                    {state.route.point_count}
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-bg-tertiary/80 rounded-lg">
+                  <span className="text-text-muted block text-[10px] uppercase">Latency</span>
+                  <span className="font-mono text-base font-bold text-accent-primary">
+                    {state.diagnostics?.total_time_ms ? `${Math.round(state.diagnostics.total_time_ms)} ms` : '<300 ms'}
+                  </span>
+                </div>
+              </div>
+
+              {state.diagnostics && (
+                <div className="pt-2 border-t border-border-primary/60 text-[11px] space-y-1 text-text-secondary">
+                  <div className="flex justify-between">
+                    <span>Preprocessing:</span>
+                    <span className="font-mono text-text-primary">{state.diagnostics.preprocessing_time_ms.toFixed(1)} ms</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Candidate Search:</span>
+                    <span className="font-mono text-text-primary">{state.diagnostics.candidate_generation_time_ms.toFixed(1)} ms</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>ML Scoring (RF):</span>
+                    <span className="font-mono text-text-primary">{state.diagnostics.model_prediction_time_ms.toFixed(1)} ms</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Viterbi Decoder:</span>
+                    <span className="font-mono text-text-primary">{state.diagnostics.decoding_time_ms.toFixed(1)} ms</span>
+                  </div>
+                </div>
+              )}
+
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full mt-3 text-xs"
+                onClick={handleExportGeoJSON}
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Export GeoJSON Route
+              </Button>
+            </Card>
           )}
         </div>
       </aside>
 
-      {/* Map */}
-      <main className="flex-1 relative min-h-[calc(100vh-4rem)]">
-        <div ref={mapContainerRef} className="w-full h-full map-container" />
+      {/* Main Map Viewer */}
+      <main className="flex-1 relative min-h-[500px] lg:min-h-full flex flex-col">
+        <div ref={mapContainerRef} className="w-full h-full flex-1" />
 
-        {/* Map Controls */}
-        <div className="absolute bottom-4 right-4 flex flex-col gap-2">
-          <div className="flex items-center gap-2 bg-bg-card/90 backdrop-blur rounded-lg border border-border-primary p-2">
-            <button
-              onClick={() => setState(prev => ({ ...prev, showGPSPoints: !prev.showGPSPoints }))}
-              className={cn(
-                'p-2 rounded transition-colors',
-                state.showGPSPoints ? 'bg-bg-tertiary text-text-primary' : 'text-text-muted hover:text-text-primary'
-              )}
-              aria-pressed={state.showGPSPoints}
-              aria-label="Toggle GPS points"
-            >
-              <MapPin className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setState(prev => ({ ...prev, showCandidates: !prev.showCandidates }))}
-              className={cn(
-                'p-2 rounded transition-colors',
-                state.showCandidates ? 'bg-bg-tertiary text-text-primary' : 'text-text-muted hover:text-text-primary'
-              )}
-              aria-pressed={state.showCandidates}
-              aria-label="Toggle candidates"
-            >
-              <Layers className="w-5 h-5" />
-            </button>
-          </div>
+        {/* Floating Map Legend & Toggles */}
+        <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-bg-card/90 backdrop-blur border border-border-primary/80 rounded-xl px-3 py-2 text-xs shadow-lg">
+          <label className="flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary">
+            <input
+              type="checkbox"
+              checked={state.showGPSPoints}
+              onChange={(e) => setState(prev => ({ ...prev, showGPSPoints: e.target.checked }))}
+              className="accent-accent-primary w-3.5 h-3.5"
+            />
+            <span className="w-2.5 h-2.5 rounded-full bg-accent-primary inline-block" />
+            <span>GPS Points</span>
+          </label>
 
-          {state.isLoading && (
-            <div className="bg-bg-card/90 backdrop-blur rounded-lg border border-border-primary p-4 flex items-center gap-3 animate-fade-in">
-              <Loader2 className="w-6 h-6 text-accent-primary animate-spin" />
-              <div>
-                <p className="font-medium text-text-primary">Reconstructing route...</p>
-                <p className="text-xs text-text-secondary">Running HMM/Viterbi pipeline</p>
-              </div>
+          {state.route && (
+            <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-border-primary/80 text-text-secondary">
+              <span className="w-4 h-1 bg-accent-tertiary rounded-full inline-block" />
+              <span>Matched Road Route</span>
             </div>
           )}
         </div>
 
-        {/* Empty state */}
-        {!state.route && !state.isLoading && state.gpsPoints.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center p-8 glass rounded-xl max-w-md mx-4 pointer-events-auto">
-              <MapPin className="w-16 h-16 mx-auto text-text-muted/50 mb-4" />
-              <h3 className="text-lg font-semibold text-text-primary mb-2">No GPS Points</h3>
-              <p className="text-text-secondary text-sm mb-6">
-                Add GPS points manually, upload a file, or paste JSON to reconstruct a route.
+        {/* Initial Prompt Card if no route yet */}
+        {!state.route && !state.isLoading && (
+          <div className="absolute bottom-6 left-6 z-20 pointer-events-none hidden sm:block">
+            <div className="glass px-4 py-3 rounded-xl border border-border-primary text-xs max-w-sm pointer-events-auto shadow-xl">
+              <div className="flex items-center gap-2 text-accent-primary font-semibold mb-1">
+                <Sparkles className="w-4 h-4" />
+                <span>Ready to Reconstruct</span>
+              </div>
+              <p className="text-text-secondary leading-snug">
+                Click <strong>"Run Reconstruction"</strong> on the left panel to execute candidate generation, ML probability scoring, and Viterbi sequence decoding on this trip.
               </p>
-              <Button variant="secondary" asChild>
-                <span>Upload a file instead</span>
-              </Button>
             </div>
           </div>
         )}

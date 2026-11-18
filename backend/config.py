@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # Model & Artifacts
     model_path: Path = Field(
-        default=Path("artifacts/model.joblib"),
+        default=Path("models/best_model/model.pkl"),
         description="Path to trained ML model"
     )
     road_graph_path: Path = Field(

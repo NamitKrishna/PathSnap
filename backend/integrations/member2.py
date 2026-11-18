@@ -245,10 +245,21 @@ class MockMLModel(MLModel):
         return features[:len(self._feature_names)]
 
     def get_feature_names(self) -> list[str]:
-        return self._feature_names.copy()
+        names = list(self._feature_names) if self._feature_names is not None else []
+        for required in ["distance_m", "heading_diff_deg"]:
+            if required not in names:
+                names.append(required)
+        return names
 
     def get_model_info(self) -> dict[str, Any]:
-        return self._model_info.copy()
+        info = dict(self._model_info) if self._model_info else {}
+        if "type" not in info:
+            info["type"] = "RandomForest" if self._model else "mock"
+        if "version" not in info:
+            info["version"] = "1.0.0"
+        if "features" not in info:
+            info["features"] = len(self.get_feature_names())
+        return info
 
 
 # --- Factory Function ---

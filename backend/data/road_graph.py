@@ -31,7 +31,10 @@ class RoadGraph:
         self.graph = graph
         self.crs = crs
         self._arc_id_to_edge: dict[str, tuple] = {}
+        self._tree = None
+        self._edge_list = []
         self._build_arc_index()
+        self._build_spatial_index()
 
     def _build_arc_index(self) -> None:
         """Build mapping from arc_id to edge key for fast lookup."""
@@ -39,6 +42,19 @@ class RoadGraph:
             arc_id = data.get("arc_id") or data.get("id") or f"{u}-{v}-{key}"
             data["arc_id"] = arc_id
             self._arc_id_to_edge[arc_id] = (u, v, key)
+
+    def _build_spatial_index(self) -> None:
+        """Build STRtree spatial index for rapid candidate search."""
+        from shapely.strtree import STRtree
+        geoms = []
+        self._edge_list = []
+        for u, v, key, data in self.graph.edges(keys=True, data=True):
+            if "geometry" in data:
+                geom = shape(data["geometry"])
+                geoms.append(geom)
+                self._edge_list.append((u, v, key, data, geom))
+        if geoms:
+            self._tree = STRtree(geoms)
 
     @classmethod
     def from_gpkg(cls, path: Path, layer: Optional[str] = None) -> "RoadGraph":
@@ -320,22 +336,24 @@ class RoadGraph:
 
         results = []
 
-        for u, v, key, data in self.graph.edges(keys=True, data=True):
-            if "geometry" not in data:
-                continue
+        if self._tree is not None:
+            # Query edges within buffer
+            cand_indices = self._tree.query(point.buffer(radius_m))
+            if len(cand_indices) == 0:
+                # Fallback to nearest geometry
+                nearest_res = self._tree.query_nearest(point)
+                cand_indices = nearest_res if hasattr(nearest_res, '__iter__') else [nearest_res]
 
-            geom = shape(data["geometry"])
-            distance = point.distance(geom)
-
-            if distance <= radius_m:
+            for idx in cand_indices:
+                u, v, key, data, geom = self._edge_list[int(idx)]
+                distance = point.distance(geom)
                 edge_data = data.copy()
                 edge_data["distance_m"] = distance
                 edge_data["arc_id"] = data.get("arc_id", key)
                 results.append(edge_data)
 
-        # Sort by distance and limit
-        results.sort(key=lambda x: x["distance_m"])
-        return results[:max_results]
+            results.sort(key=lambda x: x["distance_m"])
+            return results[:max_results]
 
     def are_connected(self, arc_id_1: str, arc_id_2: str) -> bool:
         """Check if two arcs are topologically connected (end of 1 == start of 2)."""

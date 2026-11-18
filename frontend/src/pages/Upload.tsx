@@ -21,6 +21,7 @@ import {
 interface UploadedFile {
   file: File;
   response: FileUploadResponse | null;
+  points: GPSPoint[];
   error: string | null;
   isProcessing: boolean;
 }
@@ -35,6 +36,7 @@ export function Upload() {
     const newFiles: UploadedFile[] = Array.from(fileList).map(file => ({
       file,
       response: null,
+      points: [],
       error: null,
       isProcessing: false,
     }));
@@ -48,7 +50,13 @@ export function Upload() {
 
       try {
         const response = await api.uploadGPSFile(fileData.file);
-        setFiles(prev => prev.map(f => f === fileData ? { ...f, response, isProcessing: false } : f));
+        let points: GPSPoint[] = [];
+        try {
+          points = await api.parseGPSFile(fileData.file);
+        } catch {
+          // Fallback if client parser encounters format variation
+        }
+        setFiles(prev => prev.map(f => f === fileData ? { ...f, response, points, isProcessing: false } : f));
       } catch (err) {
         setFiles(prev => prev.map(f => f === fileData ? {
           ...f,
@@ -236,10 +244,7 @@ export function Upload() {
                             <Button
                               variant="secondary"
                               size="sm"
-                              onClick={() => handleReconstruct(
-                                // We'd need to store the parsed points, for now just navigate
-                                []
-                              )}
+                              onClick={() => handleReconstruct(fileData.points)}
                             >
                               <MapPin className="w-4 h-4" />
                               Reconstruct

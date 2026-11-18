@@ -154,11 +154,48 @@ export function Evaluation() {
       attributionControl: false,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
+    const streets = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri &mdash; Street Map',
+        maxZoom: 19,
+      }
+    );
+
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
-    }).addTo(map);
+    });
+
+    const dark = L.tileLayer(
+      'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri &mdash; Dark Canvas',
+        maxZoom: 16,
+      }
+    );
+
+    const satellite = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri &mdash; Satellite',
+        maxZoom: 19,
+      }
+    );
+
+    // Add street map by default so the entire map, roads, and names are visible
+    streets.addTo(map);
+
+    L.control.layers(
+      {
+        'Street Map': streets,
+        'OpenStreetMap': osm,
+        'Dark Canvas': dark,
+        'Satellite Imagery': satellite,
+      },
+      undefined,
+      { position: 'topright' }
+    ).addTo(map);
 
     L.control.zoom({ position: 'topright' }).addTo(map);
 
@@ -176,11 +213,42 @@ export function Evaluation() {
 
     clearMapLayers();
 
+    // 1. Draw reference route immediately
     const coords = trip.reference_geometry;
-    if (coords.length >= 2) {
-      const latLngs = coords.map(([lon, lat]) => [lat, lon] as L.LatLngExpression);
+    if (coords && coords.length >= 2) {
+      const latLngs = coords.map(([lon, lat]: [number, number]) => [lat, lon] as L.LatLngExpression);
+      referenceLayerRef.current = L.polyline(latLngs, {
+        color: '#00d4aa',
+        weight: 5,
+        opacity: 0.9,
+        lineCap: 'round',
+        lineJoin: 'round',
+        dashArray: '8, 6',
+      }).bindPopup('<strong>Reference Ground Truth Route</strong>').addTo(map);
+
       const bounds = L.latLngBounds(latLngs);
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
+    }
+
+    // 2. Draw GPS observations
+    if (trip.gps_points && trip.gps_points.length > 0) {
+      trip.gps_points.forEach((point, index) => {
+        const marker = L.circleMarker([point.latitude, point.longitude], {
+          radius: 5,
+          fillColor: '#f59e0b',
+          color: '#090a10',
+          weight: 2,
+          fillOpacity: 0.95,
+        }).bindPopup(`
+          <strong>GPS Observation #${index + 1}</strong><br/>
+          Lat: ${point.latitude.toFixed(6)}<br/>
+          Lon: ${point.longitude.toFixed(6)}<br/>
+          Time: ${new Date(point.timestamp).toLocaleTimeString()}<br/>
+          ${point.speed ? `Speed: ${point.speed.toFixed(1)} m/s` : ''}
+        `);
+        marker.addTo(map);
+        gpsMarkersRef.current.push(marker);
+      });
     }
   };
 
