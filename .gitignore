@@ -93,3 +93,8 @@ logs/
 *.tmp
 .DS_Store
 .directory
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
