@@ -1,15 +1,110 @@
-@"
-Student folder.zip
-data/raw/
-data/processed/
-data/features/
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-.pytest_cache/
-.env
-*.key
-*.pem
+*.py[cod]
+*$py.class
+*.so
+
+# C / C++ / Code::Blocks (Linux Mint)
+*.o
+*.obj
+*.layout
+*.depend
+*.cbp.mak
+
+# Linux editor backup files (Xed, nano, etc.)
+*~
+*.swp
+*.swo
+.#*
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
 venv/
 .venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook checkpoints
 .ipynb_checkpoints/
-"@ | Set-Content .gitignore
+*/.ipynb_checkpoints/*
+
+# Pytest & test coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Environment variables & secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+id_rsa*
+
+# Datasets and large data files
+Student folder.zip
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/features/*
+!data/features/.gitkeep
+
+# Exclude large binary/data files generally
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.gpkg
+*.geojson
+*.gpx
+
+# Exclude dataset CSV files but preserve outputs/reports
+*.csv
+!outputs/reports/*.csv
+!outputs/reports/*.json
+
+# Model artifacts and binary checkpoints
+artifacts/*
+!artifacts/.gitkeep
+results/*
+!results/.gitkeep
+*.pkl
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.bin
+
+# Logs and temporary files
+*.log
+!outputs/logs/preprocessing.log
+logs/
+*.tmp
+.DS_Store
+.directory
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
