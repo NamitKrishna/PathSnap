@@ -1,0 +1,31 @@
+# Core scientific computing & data manipulation
+numpy
+pandas
+scipy
+
+# Geospatial analysis
+geopandas
+shapely
+pyproj
+folium
+
+# Machine Learning & Optimization
+scikit-learn
+xgboost
+optuna
+joblib
+
+# Visualization & Notebooks
+matplotlib
+seaborn
+jupyter
+
+# API & Backend
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+
+# Testing & Utilities
+pytest
+tqdm

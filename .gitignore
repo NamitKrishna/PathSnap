@@ -1,0 +1,95 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C / C++ / Code::Blocks (Linux Mint)
+*.o
+*.obj
+*.layout
+*.depend
+*.cbp.mak
+
+# Linux editor backup files (Xed, nano, etc.)
+*~
+*.swp
+*.swo
+.#*
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Pytest & test coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Environment variables & secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+id_rsa*
+
+# Datasets and large data files
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.csv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.gpkg
+*.geojson
+*.gpx
+
+# Model artifacts and binary checkpoints
+artifacts/*
+!artifacts/.gitkeep
+results/*
+!results/.gitkeep
+*.pkl
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.bin
+
+# Logs and temporary files
+*.log
+logs/
+*.tmp
+.DS_Store
+.directory
