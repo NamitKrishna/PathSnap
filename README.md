@@ -173,4 +173,6 @@ This repository provides the foundational architecture and organized structure f
 ## Team
 
 - **Namit Krishna Renjith** ([@NamitKrishna](https://github.com/NamitKrishna))
-- Hackathon Project Collaborators
+- **Prathyush P Rao** ([@Prathyush172](https://github.com/Prathyush172))
+- **Prasanna** ([@prasanna19205](https://github.com/prasanna19205))
+- **Nethra Manoj** ([@nethramanoj](https://github.com/nethramanoj))
