@@ -1,0 +1,34 @@
+{
+  "model_name": "random_forest_optimized",
+  "best_params": {
+    "n_estimators": 80,
+    "max_depth": 14,
+    "min_samples_leaf": 22,
+    "max_features": "sqrt",
+    "max_samples": 0.19879954961448965
+  },
+  "best_cv_f1": 0.7291891336886448,
+  "test_f1": 0.7348609863597435,
+  "test_top1_acc": 0.7933716075156576,
+  "features": [
+    "perp_distance",
+    "norm_proj_pos",
+    "heading_diff",
+    "speed_kmh",
+    "delta_t",
+    "delta_s",
+    "is_stationary",
+    "arc_length",
+    "from_node_out_degree",
+    "to_node_in_degree",
+    "log_perp_distance",
+    "emission_prob_gaussian",
+    "heading_diff_cos",
+    "heading_prob_gaussian",
+    "is_heading_aligned",
+    "is_heading_opposed",
+    "log_arc_length",
+    "relative_dist_diff",
+    "distance_rank_ratio"
+  ]
+}

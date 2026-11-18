@@ -3,7 +3,7 @@
 Map-matching and route reconstruction pipeline designed to clean noisy GPS trajectory logs and align them to road networks using machine learning scoring, Hidden Markov Models (HMM), and Viterbi sequence decoding.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-15%2F15%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-51%2F51%20Passing-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)]()
 
 ---
@@ -220,6 +220,114 @@ jupyter notebook
    - Average candidates per GPS point: **11.65**
    - Mean candidate hit rate: **95.98%**
    - Mean candidate miss rate: **4.02%**
+
+---
+
+## Model Training & Experimentation
+
+### 1. Problem Formulation
+Candidate-level supervised classification and ranking for map matching. Each GPS observation has multiple candidate road segments retrieved within a spatial search radius (mean 11.65 candidates/observation). 
+- **Binary Target**: `is_ground_truth ∈ {0, 1}` indicating whether candidate $c$ matches the true traversed road segment.
+- **Dataset Imbalance**: ~9.86% positive class across 1,840,910 training candidate rows; handled via inverse-frequency class weighting (`class_weight='balanced'` in scikit-learn, `scale_pos_weight=9.14` in XGBoost).
+- **Leakage Prevention**: 5-fold `GroupKFold` cross-validation grouped strictly by `trip_id` on the 80 training trips. The 10 student-test trips are held out strictly for independent test evaluation. The 10 evaluator-test trips are fully quarantined.
+
+### 2. Evaluated Models
+1. **Logistic Regression (L2)**: Linear baseline with standard feature scaling.
+2. **K-Nearest Neighbors (KNN)**: Non-parametric distance-weighted candidate ranking with indexed reference subsampling (`FastKNN`).
+3. **Decision Tree**: Non-linear tree model (`max_depth=12`, `min_samples_leaf=30`, balanced class weighting).
+4. **Random Forest**: Ensemble of 100 balanced decision trees with `max_samples=0.20` subsampling.
+5. **XGBoost (Hist)**: Gradient boosted trees with histogram-based binning (`tree_method='hist'`, `n_estimators=250`, `learning_rate=0.08`, `scale_pos_weight=9.14`).
+6. **Optimized Random Forest**: Bayesian hyperparameter tuning via Optuna (TPE sampler).
+
+### 3. Model Benchmark & Evaluation Results
+
+All models evaluated across 80 training trips (1,840,910 candidates, 16,096 observations) and 10 student-test trips (207,609 candidates, 3,958 observations):
+
+| Model | 5-Fold CV F1 | Test F1 | Test Precision | Test Recall | Test ROC-AUC | Observation Top-1 Acc |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Random Forest (Optimized)** | **0.7292** | **0.7349** | **0.5993** | **0.9498** | **0.9835** | **79.34%** |
+| **Random Forest (Baseline)** | 0.7285 ± 0.038 | 0.7340 | 0.5985 | 0.9489 | **0.9835** | 79.32% |
+| **XGBoost** | 0.7253 ± 0.034 | 0.7257 | 0.5859 | **0.9531** | 0.9834 | **79.54%** |
+| **Decision Tree** | 0.7122 ± 0.034 | 0.7171 | 0.5751 | 0.9522 | 0.9789 | 79.48% |
+| **KNN (Subsampled)** | 0.6655 ± 0.052 | 0.6941 | 0.7605 | 0.6384 | 0.9550 | 73.81% |
+| **Logistic Regression** | 0.5875 ± 0.016 | 0.5829 | 0.4247 | 0.9291 | 0.9669 | 74.92% |
+
+### 4. Bayesian Hyperparameter Optimization (Optuna)
+Optuna TPE optimization on Random Forest yielded optimal parameters:
+- `n_estimators`: 80
+- `max_depth`: 14
+- `min_samples_leaf`: 22
+- `max_features`: `sqrt`
+- `max_samples`: 0.1988 (19.88% bootstrap subsampling)
+
+### 5. Feature Importance Analysis
+Top predictive features identified by tree ensembles:
+1. `relative_dist_diff`: Relative distance difference to nearest candidate ($Δd / d_{min}$) – dominant signal across all models.
+2. `distance_rank_ratio`: Candidate distance relative to candidate set span.
+3. `perp_distance`: Orthogonal Euclidean distance from GPS point to road segment.
+4. `emission_prob_gaussian`: Gaussian emission probability density.
+5. `norm_proj_pos`: Normalized position along the candidate arc $[0, 1]$.
+6. `heading_diff_cos` & `heading_prob_gaussian`: Alignment between vehicle motion heading and road direction.
+
+### 6. Downstream HMM Prediction Format
+Candidate predictions are exported to `outputs/predictions/student_test_predictions.csv` with standard schema for emission likelihood in the HMM Viterbi decoder:
+- `trip_id`, `obs_id`, `candidate_arc_id`, `timestamp`, `candidate_rank`, `score`, `rank_by_score`, `model`, `is_ground_truth`
+
+### 7. How to Run Training
+```bash
+# Run full training pipeline with 10 Optuna HPO trials
+python -m src.model_training.run_training --trials 10
+
+# Fast debug run on a subset of trips
+python -m src.model_training.run_training --debug --trials 3
+
+# Run unit tests
+pytest tests/test_model_training.py -v
+```
+
+---
+
+## HMM & Viterbi Route Reconstruction
+
+### 1. Architecture
+Located in [`src/decoder/`](file:///C:/Users/raopr/Downloads/PathSnap/src/decoder), the sequence decoding engine converts candidate-level ML probability scores into optimal, topologically continuous road routes:
+- **`emission_model.py`**: Safely normalizes Random Forest candidate classification scores into conditional emission distributions $P(z_t \mid c_{t, k})$ with $\epsilon$-smoothing.
+- **`transition_model.py`**: Models physical road network transitions $P(c_t \mid c_{t-1})$ using directed 1-hop and 2-hop graph connectivity, exponential distance discrepancy penalties $|d_{net} - \Delta s_{gps}|$, and time gap relaxations ($\Delta t \ge 30$s).
+- **`viterbi.py`**: Log-space dynamic programming sequence decoder with backpointer traceback and fallback handling for missing candidates, disconnected components, and non-finite costs.
+- **`route_reconstruction.py`**: End-to-end benchmark pipeline evaluating all 10 student-test trips.
+
+### 2. Comparative Benchmark (10 Student-Test Trips, 19,160 Observations)
+
+| Metric | Nearest Candidate | Random Forest ML-Only | RF + HMM + Viterbi | Absolute Gain |
+| :--- | :---: | :---: | :---: | :---: |
+| **Observation Top-1 Accuracy** | 56.22% | 82.31% | **89.88%** | **+7.57%** |
+| **Route Continuity (% Connected)** | 80.53% | 89.47% | **98.66%** | **+9.19%** |
+| **Invalid Transition Count** | 3,729 | 1,959 | **215** | **-89.0% reduction** |
+| **Decoding Time (All 10 Trips)** | ~0.08s | ~0.10s | **4.28s** | ~0.22 ms / obs |
+
+### 3. Per-Trip Results Summary
+
+| Trip ID | Observations | Nearest Top-1 | ML Top-1 | Viterbi Top-1 | ML Continuity | Viterbi Continuity | Invalid Transitions | Decoding Time |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **00** | 2,503 | 47.42% | 92.61% | **96.72%** | 95.16% | **99.84%** | 4 | 0.44s |
+| **07** | 1,354 | 53.55% | 91.21% | **99.48%** | 99.19% | **99.93%** | 1 | 0.24s |
+| **09** | 1,049 | 42.61% | 81.03% | **86.65%** | 83.68% | **97.52%** | 26 | 0.29s |
+| **40** | 2,995 | 51.39% | 88.75% | **96.89%** | 94.89% | **99.63%** | 11 | 0.58s |
+| **52** | 262 | 80.53% | 94.27% | **98.86%** | 93.10% | **96.55%** | 9 | 0.05s |
+| **56** | 3,958 | 65.03% | 78.85% | **86.13%** | 85.62% | **97.19%** | 111 | 0.97s |
+| **65** | 768 | 71.74% | 77.47% | **81.12%** | 88.27% | **98.83%** | 9 | 0.17s |
+| **76** | 1,486 | 45.56% | 78.20% | **91.72%** | 83.43% | **98.25%** | 26 | 0.45s |
+| **77** | 3,911 | 42.34% | 58.78% | **72.85%** | 89.13% | **99.74%** | 10 | 0.88s |
+| **91** | 874 | 62.01% | 81.92% | **88.33%** | 82.25% | **99.08%** | 8 | 0.22s |
+
+### 4. Running Route Reconstruction
+```bash
+# Execute route reconstruction benchmark across all 10 student trips
+python -m src.decoder.route_reconstruction
+
+# Run unit tests (including decoder suite)
+pytest tests/test_decoder.py -v
+```
 
 ---
 

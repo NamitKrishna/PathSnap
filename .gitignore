@@ -83,6 +83,13 @@ data/features/*
 *.csv
 !outputs/reports/*.csv
 !outputs/reports/*.json
+!outputs/training_logs/*.csv
+!outputs/feature_importance/*.csv
+!outputs/optimization/*.csv
+!outputs/optimization/*.json
+!outputs/decoder/*.csv
+!outputs/decoder/*.json
+outputs/predictions/
 
 # Model artifacts and binary checkpoints
 artifacts/*
@@ -95,6 +102,7 @@ results/*
 *.pt
 *.pth
 *.bin
+!models/**/config.json
 
 # Logs and temporary files
 *.log

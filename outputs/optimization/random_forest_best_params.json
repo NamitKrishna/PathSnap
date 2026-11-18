@@ -1,0 +1,11 @@
+{
+  "model": "random_forest",
+  "best_cv_f1": 0.7291891336886448,
+  "params": {
+    "n_estimators": 80,
+    "max_depth": 14,
+    "min_samples_leaf": 22,
+    "max_features": "sqrt",
+    "max_samples": 0.19879954961448965
+  }
+}
